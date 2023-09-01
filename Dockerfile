@@ -7,6 +7,7 @@ RUN apt-get update -qq && apt-get -y install \
   build-essential \
   cmake \
   git-core \
+  htop \
   libass-dev \
   libfreetype6-dev \
   libgnutls28-dev \
