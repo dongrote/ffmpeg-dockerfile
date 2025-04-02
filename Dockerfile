@@ -2,6 +2,7 @@ FROM ghcr.io/linuxcontainers/debian-slim:latest AS build-ffmpeg
 ARG SVTAV1_COMMIT_HASH=1ceddd883328f923df73cbaca10e11f5f8061a71
 ARG FFMPEG_COMMIT_HASH=26c5d8cf5d6dcd520e781754d986e9907d74270e
 ARG FDKAAC_COMMIT_HASH=2ef9a141c40bf254bde7d22c197c615db5b265ed
+ARG LIBVMAF_COMMIT_HASH=8b2582db3b1d28c460393b4fea13cda435236832
 ARG DEBIAN_FRONTEND=noninteractive
 WORKDIR /root
 RUN apt-get update -qq && apt-get -y install \
@@ -9,6 +10,7 @@ RUN apt-get update -qq && apt-get -y install \
   automake \
   build-essential \
   cmake \
+  doxygen \
   git-core \
   htop \
   libass-dev \
@@ -25,14 +27,18 @@ RUN apt-get update -qq && apt-get -y install \
   libxcb-xfixes0-dev \
   libunistring-dev \
   meson \
+  nasm \
   ninja-build \
   pkg-config \
+  python3 \
+  python3-pip \
+  python3-dev \
+  python3-venv \
   texinfo \
   wget \
+  xxd \
   yasm \
   zlib1g-dev
-# NASM
-RUN apt-get -y install nasm
 # libx264 (--enable-gpl --enable-libx264)
 RUN apt-get -y install libx264-dev
 # libx265 (--enable-gpl --enable-libx265)
@@ -79,6 +85,19 @@ RUN cd fdk-aac && \
     make -j $CPUS && \
     make install
 
+## build libvmaf
+## fetch libvmaf source
+RUN mkdir vmaf && \
+  cd vmaf && \
+  git init && \
+  git remote add origin https://github.com/Netflix/vmaf && \
+  git fetch origin $LIBVMAF_COMMIT_HASH && \
+  git checkout FETCH_HEAD
+## build
+RUN cd vmaf && \
+  PATH=/root/vmaf:/root/vmaf/libvmaf/build/tools:$PATH make PYTHON_INTERPRETER=python3 -j$(nproc) && \
+  make install
+
 ## build ffmpeg
 RUN mkdir -p ffmpeg-sources/ffmpeg bin
 
@@ -108,6 +127,7 @@ RUN cd ffmpeg-sources/ffmpeg && \
   --enable-libopus \
   --enable-libsvtav1 \
   --enable-libdav1d \
+  --enable-libvmaf \
   --enable-libvorbis \
   --enable-libvpx \
   --enable-libx264 \
@@ -125,4 +145,7 @@ COPY --from=build-ffmpeg /root/fdk-aac/.libs/libfdk-aac.so.2 /usr/lib/x86_64-lin
 COPY --from=build-ffmpeg /usr/lib/x86_64-linux-gnu /usr/lib/
 COPY --from=build-ffmpeg /usr/lib/x86_64-linux-gnu/pulseaudio /usr/lib/x86_64-linux-gnu/
 COPY --from=build-ffmpeg /lib/x86_64-linux-gnu /lib/
+COPY --from=build-ffmpeg /usr/local/bin/vmaf /usr/bin/vmaf
+COPY --from=build-ffmpeg /usr/local/lib/x86_64-linux-gnu/libvmaf.so.3 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /root/vmaf/model /vmaf/model
 ENTRYPOINT ["ffmpeg"]
