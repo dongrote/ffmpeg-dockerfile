@@ -1,8 +1,12 @@
 FROM ghcr.io/linuxcontainers/debian-slim:latest AS build-ffmpeg
-ARG SVTAV1_COMMIT_HASH=1ceddd883328f923df73cbaca10e11f5f8061a71
-ARG FFMPEG_COMMIT_HASH=26c5d8cf5d6dcd520e781754d986e9907d74270e
+# https://gitlab.com/AOMediaCodec/SVT-AV1/-/commits/master?ref_type=HEADS
+ARG SVTAV1_COMMIT_HASH=4f0794415e707daa3ce99791158d033be0196d98
+# https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/HEAD
+ARG FFMPEG_COMMIT_HASH=9c55f22ef234046dfd47ae414f59e9e2c1530263
+# https://github.com/mstorsjo/fdk-aac/commits/master/
 ARG FDKAAC_COMMIT_HASH=2ef9a141c40bf254bde7d22c197c615db5b265ed
-ARG LIBVMAF_COMMIT_HASH=8b2582db3b1d28c460393b4fea13cda435236832
+# https://github.com/Netflix/vmaf/commits/master/
+ARG LIBVMAF_COMMIT_HASH=b9ac69e6c4231fad0465021f9e31a841a18261db
 ARG DEBIAN_FRONTEND=noninteractive
 WORKDIR /root
 RUN apt-get update -qq && apt-get -y install \
