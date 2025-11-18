@@ -1,15 +1,20 @@
 FROM ghcr.io/linuxcontainers/debian-slim:latest AS build-ffmpeg
 # https://gitlab.com/AOMediaCodec/SVT-AV1/-/commits/master?ref_type=HEADS
-ARG SVTAV1_COMMIT_HASH=4f0794415e707daa3ce99791158d033be0196d98
+ARG SVTAV1_COMMIT_HASH=090bdfbaa7a3628af218a41275662c55f0f3b937
+ENV SVTAV1_COMMIT_HASH=${SVTAV1_COMMIT_HASH}
 # https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/HEAD
-ARG FFMPEG_COMMIT_HASH=9c55f22ef234046dfd47ae414f59e9e2c1530263
+ARG FFMPEG_COMMIT_HASH=643e2e10f980cf99c4e37da027b209dcdc1ac56f
+ENV FFMPEG_COMMIT_HASH=${FFMPEG_COMMIT_HASH}
 # https://github.com/mstorsjo/fdk-aac/commits/master/
-ARG FDKAAC_COMMIT_HASH=2ef9a141c40bf254bde7d22c197c615db5b265ed
+ARG FDKAAC_COMMIT_HASH=d8e6b1a3aa606c450241632b64b703f21ea31ce3
+ENV FDKAAC_COMMIT_HASH=${FDKAAC_COMMIT_HASH}
 # https://github.com/Netflix/vmaf/commits/master/
-ARG LIBVMAF_COMMIT_HASH=b9ac69e6c4231fad0465021f9e31a841a18261db
+ARG LIBVMAF_COMMIT_HASH=e0d9b82d3b55de55927f1e7e7bd11f40a35de3e0
+ENV LIBVMAF_COMMIT_HASH=${LIBVMAF_COMMIT_HASH}
 ARG DEBIAN_FRONTEND=noninteractive
 WORKDIR /root
-RUN apt-get update -qq && apt-get -y install \
+COPY scripts/ /root/scripts/
+RUN apt-get update -qq && apt-get upgrade -y && apt-get -y install \
   autoconf \
   automake \
   build-essential \
@@ -73,72 +78,18 @@ RUN apt-get -y install libdav1d-dev
 # libvmaf (--enable-libvmaf)
 # -- no deps
 
-## build libfdk-aac
-## checkout fdk-aac commit hash $FDKAAC_COMMIT_HASH using sparse checkout
-RUN mkdir fdk-aac && \
-  cd fdk-aac && \
-  git init && \
-  git remote add origin https://github.com/mstorsjo/fdk-aac && \
-  git fetch origin $FDKAAC_COMMIT_HASH && \
-  git checkout FETCH_HEAD
+## build and install libfdk-aac
+RUN /root/scripts/install-libfdk-aac.sh
 
-# RUN git clone --depth 1 https://github.com/mstorsjo/fdk-aac
-RUN cd fdk-aac && \
-    autoreconf -fiv && \
-    ./configure && \
-    make -j $CPUS && \
-    make install
+# Install nv-codec-headers for libvmaf and ffmpeg NVENC/NVDEC support
+RUN /root/scripts/install-nvcodec-headers.sh
+RUN /root/scripts/install-nvidia-cuda-toolkit.sh
 
-## build libvmaf
-## fetch libvmaf source
-RUN mkdir vmaf && \
-  cd vmaf && \
-  git init && \
-  git remote add origin https://github.com/Netflix/vmaf && \
-  git fetch origin $LIBVMAF_COMMIT_HASH && \
-  git checkout FETCH_HEAD
-## build
-RUN cd vmaf && \
-  PATH=/root/vmaf:/root/vmaf/libvmaf/build/tools:$PATH make PYTHON_INTERPRETER=python3 -j$(nproc) && \
-  make install
+## build libvmaf; latest libvmaf requires nv-codec-headers
+RUN /root/scripts/install-libvmaf.sh
 
 ## build ffmpeg
-RUN mkdir -p ffmpeg-sources/ffmpeg bin
-
-## checkout ffmpeg commit hash $FFMPEG_COMMIT_HASH using sparse checkout
-RUN cd ffmpeg-sources/ffmpeg && \
-  git init && \
-  git remote add origin https://github.com/FFmpeg/FFmpeg && \
-  git fetch origin $FFMPEG_COMMIT_HASH && \
-  git checkout FETCH_HEAD
-## RUN git clone --depth=1 https://github.com/FFmpeg/FFmpeg ffmpeg-sources/ffmpeg
-RUN cd ffmpeg-sources/ffmpeg && \
-  PATH="$HOME/bin:$PATH" PKG_CONFIG_PATH="$HOME/ffmpeg_build/lib/pkgconfig:/usr/local/lib/pkgconfig" LD_LIBRARY_PATH="/usr/local/lib" ./configure \
-  --prefix="$HOME/ffmpeg_build" \
-  --pkg-config-flags="--static" \
-  --extra-cflags="-I$HOME/ffmpeg_build/include" \
-  --extra-ldflags="-L$HOME/ffmpeg_build/lib" \
-  --extra-libs="-lpthread -lm" \
-  --ld="g++" \
-  --bindir="$HOME/bin" \
-  --enable-gpl \
-  --enable-gnutls \
-# --enable-libaom \
-  --enable-libass \
-  --enable-libfdk-aac \
-  --enable-libfreetype \
-  --enable-libmp3lame \
-  --enable-libopus \
-  --enable-libsvtav1 \
-  --enable-libdav1d \
-  --enable-libvmaf \
-  --enable-libvorbis \
-  --enable-libvpx \
-  --enable-libx264 \
-  --enable-libx265 \
-  --enable-nonfree && \
-PATH="$HOME/bin:$PATH" make -j$(nproc) && \
-make install
+RUN /root/scripts/install-ffmpeg.sh
 
 FROM ghcr.io/linuxcontainers/debian-slim:latest
 WORKDIR /work
@@ -152,4 +103,13 @@ COPY --from=build-ffmpeg /lib/x86_64-linux-gnu /lib/
 COPY --from=build-ffmpeg /usr/local/bin/vmaf /usr/bin/vmaf
 COPY --from=build-ffmpeg /usr/local/lib/x86_64-linux-gnu/libvmaf.so.3 /usr/lib/x86_64-linux-gnu/
 COPY --from=build-ffmpeg /root/vmaf/model /vmaf/model
+COPY --from=build-ffmpeg /root/ffmpeg_build/lib/libavdevice.so.62 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /root/ffmpeg_build/lib/libavcodec.so.62 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /root/ffmpeg_build/lib/libavformat.so.62 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /root/ffmpeg_build/lib/libavfilter.so.11 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /root/ffmpeg_build/lib/libavutil.so.60 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /root/ffmpeg_build/lib/libswresample.so.6 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /root/ffmpeg_build/lib/libswscale.so.9 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /usr/lib/x86_64-linux-gnu/libnvcuvid.so.1 /usr/lib/x86_64-linux-gnu/
+COPY --from=build-ffmpeg /usr/lib/x86_64-linux-gnu/libnvidia-encode.so.1 /usr/lib/x86_64-linux-gnu/
 ENTRYPOINT ["ffmpeg"]
